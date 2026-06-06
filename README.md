@@ -46,7 +46,35 @@ A captured run is in [`docs/demo-capture.txt`](docs/demo-capture.txt).
 
 ---
 
+## The Differentiator
+
+Most AI agents act. Sentinel **stops**.
+
+Every other deployment bot races to fix prod on its own. Sentinel does the
+analysis, proposes the fix, and then **halts at a human gate** before anything
+destructive runs — showing you what it wants to do, why, the risk score, and
+the alternatives. AI suggests. You decide. Every decision is logged.
+
+That gate is the whole point. It's the line between *AI assistance* and
+*AI autonomy over production* — and engineers want the former.
+
+---
+
 ## Architecture
+
+```mermaid
+flowchart TD
+    A[PR / Deploy Event] --> B[DETECT<br/>risk signal scanner]
+    B --> C[DIAGNOSE<br/>Gemini 2.0 Flash root cause]
+    C --> D[ACT<br/>GitLab MCP proposes action]
+    D --> E{Destructive?}
+    E -- no --> G[EXECUTE]
+    E -- yes --> F[/SENTINEL RISK GATE<br/>human approval required/]
+    F -- approve --> G[EXECUTE<br/>logged + auditable]
+    F -- hold --> H[HOLD<br/>logged + auditable]
+    G --> I[(sentinel-audit.log)]
+    H --> I
+```
 
 ```
 [PR / Deploy Event]
