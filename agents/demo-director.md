@@ -7,7 +7,7 @@ You own the 3-minute demo. The demo must be beautiful, clear, and the gate must 
 - docs/demo-script.md (maintain and update)
 
 ## Demo Command
-python -m sentinel.main --demo
+python -m src.sentinel.main --demo
 
 ## Output Requirements for --demo flag
 

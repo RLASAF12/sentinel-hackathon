@@ -14,16 +14,20 @@ Update daily. No item stays "TODO" past Day 2.
 
 | # | Criterion | Status | Evidence |
 |---|-----------|--------|----------|
-| 1 | Uses Google Cloud | TODO | Gemini + Cloud Run |
-| 2 | Agent architecture | TODO | ADK + 7 subagents |
-| 3 | MCP integration | TODO | GitLab MCP |
-| 4 | Responsible AI | TODO | Risk gate |
-| 5 | Technical depth | TODO | |
-| 6 | Demo quality | TODO | 3-min video |
-| 7 | Innovation | TODO | |
-| 8 | Completeness | TODO | |
+| 1 | Uses Google Cloud | DONE | Gemini 2.0 Flash in src/sentinel/diagnose.py; Cloud Run via Dockerfile + deploy.sh + /health |
+| 2 | Agent architecture | DONE | Orchestrator (CLAUDE.md) + 7 subagents (agents/) + 5 workflows; linear ADK pipeline |
+| 3 | MCP integration | DONE | src/mcp/client.py wraps GitLab MCP (get_diff/create_comment/get_pipeline/cancel_pipeline) |
+| 4 | Responsible AI | DONE | src/sentinel/gate.py human gate + append-only audit log; fail-safe deny |
+| 5 | Technical depth | DONE | async pipeline, lazy SDK imports + mock/heuristic fallbacks, 6 passing tests |
+| 6 | Demo quality | IN PROGRESS | docs/demo-script.md + docs/demo-capture.txt ready; video recording is human-only |
+| 7 | Innovation | DONE | Human risk-gate before destructive actions — the novel pattern |
+| 8 | Completeness | DONE | Working src/, tests green, README with all required sections, Dockerfile |
 
 Status: TODO / IN PROGRESS / DONE / AT RISK
+
+Updated: W4 (Day 4). Rubric 7/8 DONE; #6 pending the human-recorded video.
+Remaining human-only steps: (a) record + upload demo video, (b) confirm exact
+Devpost track names, (c) click Submit on Devpost.
 
 ## Pre-Submission Checklist
 Do not submit without all boxes checked:

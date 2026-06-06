@@ -26,14 +26,23 @@ git clone https://github.com/RLASAF12/sentinel-hackathon
 cd sentinel-hackathon
 pip install -r requirements.txt
 
-# Demo mode (no API keys required)
-python -m sentinel.main --demo
+# Demo mode (no API keys required) — full pipeline with mock MCP + heuristic diagnosis
+python -m src.sentinel.main --demo
 
 # With real APIs
 export GEMINI_API_KEY=your_key
 export GITLAB_TOKEN=your_token
-python -m sentinel.main
+python -m src.sentinel.main
+
+# Run the tests
+pytest -q
+
+# Run the Cloud Run health server locally
+python -m src.sentinel.main --serve   # then: curl localhost:8080/health
 ```
+
+At the gate, type `y` to approve, `n` to hold, or `d` to inspect evidence.
+A captured run is in [`docs/demo-capture.txt`](docs/demo-capture.txt).
 
 ---
 
@@ -60,18 +69,30 @@ Multi-agent system (Google ADK): Orchestrator + 7 specialized subagents + 5 work
 ## The Risk Gate
 
 ```
-+--------------------------------------------------+
-|         SENTINEL RISK GATE                       |
-+--------------------------------------------------+
-|  Action:      ROLLBACK pipeline #12345           |
-|  Risk Score:  87% (HIGH)                         |
-|  Evidence:    47 files changed, config modified  |
-|  Alternative: Delay 2h + notify team             |
-+--------------------------------------------------+
-  Approve? (y)es / (n)o / (d)etails:
+╭───────────────────────── SENTINEL RISK GATE ──────────────────────────╮
+│  Action      ROLLBACK pipeline #12345                                  │
+│  Risk Score  98%                                                       │
+│  Type        ROLLBACK                                                  │
+│  Evidence 1  Large deployment scope + infra/config changes            │
+│  Evidence 2  Delay 2h and notify the on-call team                     │
+│  Evidence 3  Restore test coverage before deploying                   │
+╰───────── Human approval required — AI cannot proceed alone ───────────╯
+
+Approve? (y) / (n) / (d)etails:
 ```
 
 Before any destructive action runs, Sentinel shows you what, why, risk score, and alternatives. You decide. No autonomous destructive actions — ever.
+
+Every decision is appended to `sentinel-audit.log` as a JSON line:
+
+```json
+{"timestamp": "2026-06-06T11:22:48Z", "action": "rollback", "destructive": true,
+ "risk_score": 0.98, "approved": false, "approver": "human-cli", "notes": "Decision: 'n'"}
+```
+
+**Fail-safe by design:** anything other than an explicit `y` holds the action.
+In non-interactive contexts (CI, piped recordings) the gate denies by default
+unless `SENTINEL_AUTO_APPROVE=true` is set.
 
 ---
 
@@ -81,7 +102,11 @@ Before any destructive action runs, Sentinel shows you what, why, risk score, an
 |-----------|------|
 | Gemini 2.0 Flash | Risk diagnosis, root cause analysis |
 | Google ADK | Multi-agent orchestration |
-| Cloud Run | Deployment target |
+| Cloud Run | Deployment target (`Dockerfile` + `deploy.sh`, `/health` endpoint) |
+
+Deploy: `PROJECT_ID=<id> ./deploy.sh` (builds with Cloud Build, deploys to Cloud Run).
+Gemini is called lazily — in demo mode a deterministic heuristic stands in so the
+pipeline runs with zero credentials.
 
 ---
 
@@ -123,16 +148,29 @@ sentinel-hackathon/
 +-- PLAN.md            5-day sprint plan + rubric map
 +-- agents/            7 subagent definitions
 +-- workflows/         W1-W5 Claude Code workflow commands
-+-- src/sentinel/      Core source code
-+-- docs/              Demo script, submission draft
-+-- tests/             Test suite
++-- src/sentinel/      Core pipeline: detect, diagnose, act, gate, main
++-- src/mcp/           GitLab MCP client + demo mock
++-- docs/              Demo script + capture, submission draft, ADR, MCP setup
++-- tests/             Test suite (pytest)
++-- Dockerfile         Cloud Run image
++-- deploy.sh          Cloud Run deploy script
 ```
 
 ---
 
 ## Demo
 
-[Video link added after recording]
+- **Video:** _[add unlisted YouTube/Loom URL after recording — see `docs/demo-script.md`]_
+- **Captured run:** [`docs/demo-capture.txt`](docs/demo-capture.txt) (golden path, gate approved)
+
+Record with:
+
+```bash
+export SENTINEL_DEMO=true
+clear
+python -m src.sentinel.main --demo
+# type 'y' at the gate — let the panel breathe for 2+ seconds (the money shot)
+```
 
 ---
 
