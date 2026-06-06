@@ -23,7 +23,7 @@ Commands to run before recording:
 
 ### [0:00] Start
 Type and press Enter:
-  python -m sentinel.main --demo
+  python -m src.sentinel.main --demo
 
 ### [0:05] Header
   SENTINEL - Risk Guardian for CI/CD
