@@ -153,13 +153,17 @@ GITLAB_TOOL_FILTER = [
 def build_gitlab_mcp_toolset():
     """Construct the real GitLab MCP toolset (lazy ADK import).
 
-    Primary path is GitLab's **official** MCP server over HTTP
-    (``https://gitlab.com/api/v4/mcp``), authenticated with a Personal Access
-    Token (``api`` scope) via an ``Authorization: Bearer`` header — the most
-    credible integration for the GitLab partner track. Set
-    ``SENTINEL_GITLAB_MCP=stdio`` to fall back to the community stdio server
-    (``npx -y @zereight/mcp-gitlab``) if the hosted server's write tools are not
-    available on the account's plan.
+    Two backends, selected by ``SENTINEL_GITLAB_MCP``:
+
+    - ``stdio`` (default): the community ``@zereight/mcp-gitlab`` server, driven
+      by a Personal Access Token (``api`` scope). Verified live against GitLab.com
+      SaaS — exposes ``cancel_pipeline`` / ``create_merge_request`` etc. with
+      ``USE_PIPELINE=true``. This is the default because it works on any GitLab
+      plan.
+    - ``http``: GitLab's **official** MCP server over Streamable HTTP
+      (``/api/v4/mcp`` + ``Authorization: Bearer <PAT>``). The most
+      partner-credible option, but the endpoint requires **GitLab Duo** (a paid
+      plan); it returns 404 on Free accounts. Use this on a Duo-enabled instance.
 
     Requires google-adk + mcp installed and GITLAB_TOKEN set.
     """
@@ -167,22 +171,44 @@ def build_gitlab_mcp_toolset():
 
     token = os.getenv("GITLAB_TOKEN", "")
     gitlab_url = os.getenv("GITLAB_URL", "https://gitlab.com").rstrip("/")
-    mode = os.getenv("SENTINEL_GITLAB_MCP", "http").lower()
+    mode = os.getenv("SENTINEL_GITLAB_MCP", "stdio").lower()
 
     if mode == "stdio":
         from google.adk.tools.mcp_tool import StdioConnectionParams
         from mcp import StdioServerParameters
 
+        # Prefer the globally-installed binary (fast); fall back to npx download.
+        import shutil
+
+        if shutil.which("mcp-gitlab"):
+            command, args = "mcp-gitlab", []
+        else:
+            command, args = "npx", ["-y", "@zereight/mcp-gitlab"]
+
+        # StdioServerParameters.env REPLACES the subprocess environment, so we
+        # must forward anything the Node server needs — notably PATH and, in
+        # TLS-intercepting environments, the CA bundle (NODE_EXTRA_CA_CERTS),
+        # or Node rejects HTTPS with "self-signed certificate in chain".
+        child_env = {
+            "GITLAB_PERSONAL_ACCESS_TOKEN": token,
+            "GITLAB_API_URL": f"{gitlab_url}/api/v4",
+            # Expose CI/CD pipeline tools (get/list/cancel_pipeline).
+            "USE_PIPELINE": os.getenv("USE_PIPELINE", "true"),
+            "PATH": os.getenv("PATH", ""),
+        }
+        for var in ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "HOME"):
+            if os.getenv(var):
+                child_env[var] = os.environ[var]
+
         return McpToolset(
             connection_params=StdioConnectionParams(
                 server_params=StdioServerParameters(
-                    command="npx",
-                    args=["-y", "@zereight/mcp-gitlab"],
-                    env={
-                        "GITLAB_PERSONAL_ACCESS_TOKEN": token,
-                        "GITLAB_API_URL": f"{gitlab_url}/api/v4",
-                    },
-                )
+                    command=command,
+                    args=args,
+                    env=child_env,
+                ),
+                # First npx run downloads the package; give it room.
+                timeout=float(os.getenv("SENTINEL_MCP_TIMEOUT", "60")),
             ),
             tool_filter=GITLAB_TOOL_FILTER,
         )
