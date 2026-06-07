@@ -39,7 +39,17 @@ pytest -q
 
 # Run the Cloud Run health server locally
 python -m src.sentinel.main --serve   # then: curl localhost:8080/health
+
+# Web UI — the approval moment in the browser
+python -m src.sentinel.web            # then open http://localhost:8080
 ```
+
+> **Qualification-stack rebuild (in progress):** `src/sentinel/agent.py` rebuilds
+> the orchestration as a Google ADK `LlmAgent` on **Gemini 3** whose tools are the
+> **real GitLab MCP server**, with the human gate enforced via a
+> `before_tool_callback`. It's written against the verified ADK API but must be
+> installed/run/deployed from a Google Cloud session — see
+> [`WINNING-BUILD-PROMPT.md`](WINNING-BUILD-PROMPT.md).
 
 At the gate, type `y` to approve, `n` to hold, or `d` to inspect evidence.
 A captured run is in [`docs/demo-capture.txt`](docs/demo-capture.txt).
@@ -199,6 +209,12 @@ clear
 python -m src.sentinel.main --demo
 # type 'y' at the gate — let the panel breathe for 2+ seconds (the money shot)
 ```
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 Harel Asaf
 
 ---
 
