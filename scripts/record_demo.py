@@ -6,14 +6,19 @@ Deny (HOLD) -> Approve (real GitLab cancel) -> audit. Outputs a .webm; compose
 to mp4 with scripts/compose_demo.sh.
 """
 
+import glob
 import os
 import time
 from playwright.sync_api import sync_playwright
 
-URL = "http://localhost:8080"
-CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
-OUT = "docs/demo/raw"
+URL = os.getenv("SENTINEL_URL", "http://localhost:8080")
+OUT = os.getenv("SENTINEL_DEMO_OUT", "docs/demo/raw")
 os.makedirs(OUT, exist_ok=True)
+
+# Use the bundled Playwright Chromium if present (this container ships one at
+# /opt/pw-browsers); otherwise fall back to the pip-installed default.
+_cands = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))
+CHROME = _cands[-1] if _cands else None
 
 CAPTION_JS = """
 (text) => {
@@ -52,9 +57,10 @@ def wait_for_gate(page, msgs, timeout_ms=90000):
 
 def main():
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            executable_path=CHROME, args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
+        launch_kwargs = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+        if CHROME:
+            launch_kwargs["executable_path"] = CHROME
+        browser = p.chromium.launch(**launch_kwargs)
         ctx = browser.new_context(
             viewport={"width": 1280, "height": 800},
             record_video_dir=OUT,
