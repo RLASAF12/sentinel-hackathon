@@ -116,6 +116,27 @@ class RiskGate:
             timestamp=datetime.utcnow(),
         )
 
+    def record_decision(
+        self,
+        action: ProposedAction,
+        approved: bool,
+        approver: str = "human-web",
+        notes: str = "",
+    ) -> ApprovalResult:
+        """Record a programmatic approval decision (web UI / agent callback).
+
+        Builds an ApprovalResult and writes the same audit entry the CLI gate
+        does, so every approval path shares one append-only trail.
+        """
+        result = ApprovalResult(
+            approved=approved,
+            approver=approver,
+            notes=notes or f"Decision: {'approve' if approved else 'deny'}",
+            timestamp=datetime.utcnow(),
+        )
+        self._log_decision(result, action)
+        return result
+
     def _log_decision(self, result: ApprovalResult, action: ProposedAction) -> None:
         entry = {
             "timestamp": result.timestamp.isoformat(),

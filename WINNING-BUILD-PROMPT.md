@@ -55,6 +55,26 @@ Current repo state (verified, runs, 6/6 tests, both gate paths, `/health` 200):
   · 🥉 $2,000. Two judges are GitLab staff — build something a GitLab DevSecOps
   person respects.
 
+## PROGRESS (already done from the build container — no cloud access)
+
+- **Fix 1 — LICENSE: DONE.** MIT at repo root.
+- **Fix 2/3 — DRAFTED, needs cloud to run.** `src/sentinel/agent.py` implements
+  the ADK `LlmAgent` (Gemini 3), the GitLab `McpToolset`, and the human gate as
+  a `before_tool_callback`, written against the **verified June-2026 ADK API**
+  (`McpToolset(connection_params=StdioConnectionParams(server_params=...))`;
+  `before_tool_callback(tool, args, tool_context)` returning a dict to HOLD /
+  None to proceed). The cloud session must: `pip install "google-adk>=1.14.0"`,
+  confirm the live **Gemini 3 model id** (`SENTINEL_MODEL`, default
+  `gemini-3-pro-preview`; docs point to `gemini-3.1-pro-preview`), provide
+  `GITLAB_TOKEN` + confirm the GitLab MCP server command/tool names, then run
+  and verify. Gate-callback logic is unit-tested without ADK (5 tests).
+- **Fix 5 — Web UI: DONE locally.** `src/sentinel/web.py` (stdlib, zero new
+  deps) renders the gate as the visual centerpiece; Approve executes + audits,
+  Deny HOLDs + audits. Currently drives the existing pipeline; swap `_scan()` for
+  an `agent.run_agent()` call once Fix 2 runs.
+- Remaining blocked here: **G2 live Gemini 3, G3 live GitLab effect, G5 deploy**
+  (no cloud / keys / gcloud in the container) and **G6 video / G7 submit**.
+
 ## CURRENT GAPS
 
 | # | Gap | Severity |
