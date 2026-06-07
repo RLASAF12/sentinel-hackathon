@@ -67,6 +67,18 @@ PAGE = """<!doctype html>
   .banner { font-size:13px; padding:8px 12px; border-radius:8px; margin-top:8px; }
   .banner.held { background:rgba(210,153,34,.15); color:var(--amber); }
   .banner.exec { background:rgba(63,185,80,.15); color:var(--green); }
+  /* Hero — the cold-open statement */
+  .hero { text-align:center; padding:64px 16px 28px; }
+  .hero h2 { margin:0; font-size:34px; line-height:1.25; font-weight:700;
+             letter-spacing:-.01em; }
+  .hero h2 .danger { color:var(--red); }
+  .hero h2 .brake { color:var(--green); }
+  .hero .tag { margin-top:18px; color:var(--dim); font-size:16px; }
+  .hero .tag em { color:var(--text); font-style:normal; border-bottom:2px solid var(--red); }
+  #scan { display:block; margin:26px auto 0; font-size:16px; padding:14px 26px;
+          border-color:var(--red); color:var(--text); }
+  #scan:hover { background:rgba(248,81,73,.12); }
+  @media (max-width:600px){ .hero h2 { font-size:24px; } }
 </style>
 </head>
 <body>
@@ -75,6 +87,11 @@ PAGE = """<!doctype html>
   <div class="sub">Detect → Diagnose (Gemini) → Act (GitLab MCP) → <b>human GATE</b> → Execute</div>
 </header>
 <main>
+  <div id="hero" class="hero">
+    <h2>AI agents that <span class="danger">act</span> are dangerous without a brake.<br/>
+        Sentinel is the <span class="brake">brake</span>.</h2>
+    <div class="tag">The agent that knows when <em>not</em> to ship.</div>
+  </div>
   <button id="scan" onclick="scan()">▶ Review the pending deployment</button>
 
   <div id="detect" class="card hidden">
@@ -111,6 +128,7 @@ PAGE = """<!doctype html>
 <script>
 async function scan() {
   document.getElementById('scan').disabled = true;
+  document.getElementById('hero').classList.add('hidden');
   const r = await fetch('/api/scan', {method:'POST'}); const d = await r.json();
   show('detect'); document.getElementById('score').textContent =
     'risk score ' + d.score.toFixed(2);
