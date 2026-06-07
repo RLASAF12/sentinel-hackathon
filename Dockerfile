@@ -12,5 +12,7 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# Cloud Run sends traffic to $PORT; the server exposes GET /health.
-CMD ["python", "-m", "src.sentinel.main", "--serve"]
+# Cloud Run sends traffic to $PORT. Serve the web UI (the risk-gate centerpiece);
+# it also exposes GET /health. Live mode (real Gemini 3 + real GitLab) is enabled
+# by setting SENTINEL_DEMO=false + GitLab/Vertex env vars at deploy time.
+CMD ["python", "-m", "src.sentinel.web"]

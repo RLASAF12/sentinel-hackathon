@@ -1,0 +1,15 @@
+# Keep the Cloud Build upload lean and safe.
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.secrets/
+*sa-key*.json
+service-account*.json
+scripts/shots/
+sentinel-audit.log
