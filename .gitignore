@@ -26,3 +26,7 @@ sentinel-audit.log
 *sa-key*.json
 service-account*.json
 *-key.json
+
+# Demo render scratch
+docs/demo/raw/
+docs/demo/chk-*.png
