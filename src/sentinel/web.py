@@ -150,8 +150,32 @@ function show(id){ document.getElementById(id).classList.remove('hidden'); }
 
 
 def _scan() -> dict:
-    """Run detect -> diagnose -> propose and stash the proposal for /api/decision."""
-    context = DEMO_RISK_CONTEXT if _demo() else {}
+    """Run detect -> diagnose -> propose and stash the proposal for /api/decision.
+
+    Live mode (SENTINEL_DEMO=false) reads a real GitLab pipeline and diagnoses it
+    with Gemini 3; demo mode uses the canned context + heuristic diagnoser.
+    """
+    if not _demo():
+        from .live import live_scan
+
+        report, diagnosis, action = live_scan(os.environ["GITLAB_PROJECT_ID"])
+        _PENDING["action"] = action
+        return {
+            "score": report.score,
+            "signals": [
+                {"type": s.type, "severity": s.severity, "evidence": s.evidence}
+                for s in report.signals
+            ],
+            "root_cause": diagnosis.root_cause,
+            "severity": diagnosis.severity.value,
+            "action_type": action.action_type,
+            "description": action.description,
+            "destructive": action.destructive,
+            "risk_score": action.risk_score,
+            "evidence": action.evidence,
+        }
+
+    context = DEMO_RISK_CONTEXT
     report = RiskDetector().scan(context)
     diagnoser = GeminiDiagnoser(api_key=os.getenv("GEMINI_API_KEY", ""))
     diagnosis = diagnoser.diagnose(report, diff=context.get("diff_summary", ""))
@@ -181,6 +205,37 @@ async def _decide(approve: bool) -> dict:
         return {"success": False, "action_taken": "No pending action.", "audit": {}}
     gate = RiskGate()
     approval = gate.record_decision(action, approved=approve, approver="human-web")
+
+    # Live mode: a real GitLab cancel happens ONLY on approval; deny holds.
+    if not _demo():
+        from .live import cancel_pipeline
+
+        audit = {
+            "action": action.action_type,
+            "description": action.description,
+            "approved": approval.approved,
+            "approver": approval.approver,
+            "timestamp": approval.timestamp.isoformat(),
+        }
+        if approval.approved:
+            ctx = action.description  # cancel_pipeline(project_id=.., pipeline_id=..)
+            pid = int(ctx.split("pipeline_id=")[1].rstrip(")"))
+            proj = ctx.split("project_id=")[1].split(",")[0]
+            result = cancel_pipeline(proj, pid)
+            audit["gitlab_status"] = result.get("status")
+            return {
+                "approved": True,
+                "success": True,
+                "action_taken": f"Cancelled pipeline {pid} (now '{result.get('status')}') via GitLab.",
+                "audit": audit,
+            }
+        return {
+            "approved": False,
+            "success": False,
+            "action_taken": "HELD — human denied. Pipeline left running.",
+            "audit": audit,
+        }
+
     execution = await ActionOrchestrator(mcp_client=get_mcp_client()).execute(action, approval)
     return {
         "approved": approval.approved,
