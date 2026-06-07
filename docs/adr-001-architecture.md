@@ -1,90 +1,65 @@
-# ADR-001 — Multi-agent Risk Detection Pipeline with Human Gate
+# ADR-001 — Agent pipeline with an in-loop human gate
 
 - **Status:** Accepted
-- **Date:** 2026-06-06 (W1, Day 1)
-- **Owners:** architect subagent
-- **Supersedes:** none
+- **Date:** 2026-06-07
 
 ## Context
 
-Sentinel is our submission to the Google Cloud Rapid Agent Hackathon. The
-problem: AI agents that take CI/CD actions (rollback, redeploy, patch) can act
-on production **autonomously** — which is exactly when you least want a fully
-autonomous agent. We need an agent that detects deployment risk, reasons about
-it, proposes an action, and then **stops and asks a human** before doing
-anything destructive.
-
-We need an architecture that is:
-- Demo-able in 3 minutes (terminal recording — see `docs/demo-script.md`).
-- Mapped to every rubric criterion (Google Cloud, multi-agent, MCP,
-  Responsible AI, technical depth, originality).
-- Buildable in a 5-day sprint with no placeholders in `src/`.
+AI agents that take CI/CD actions (cancel a deploy, revert a change, roll back)
+can act on production **autonomously** — exactly when you least want full
+autonomy. We need an agent that detects deployment risk, reasons about it,
+proposes an action, and then **stops and asks a human** before doing anything
+destructive — with an auditable record of every decision.
 
 ## Decision
 
-Build a **linear pipeline** with a **blocking human gate** before execution:
+The agent is a Google **ADK `LlmAgent` running Gemini 3** whose tools are the
+**real GitLab MCP server** plus a `risk_scan` function tool. The flow:
 
 ```
-[Trigger: CI / PR / deploy signal]
-        |
-  DETECT     (RiskDetector.scan -> RiskReport)
-        |
-  DIAGNOSE   (GeminiDiagnoser.diagnose -> Diagnosis)   <- Gemini 2.0 Flash
-        |
-  ACT        (ActionOrchestrator.propose_action -> ProposedAction)  <- GitLab MCP
-        |
-  GATE       (RiskGate.request_approval -> ApprovalResult)   <- HUMAN, differentiator
-        |
-  EXECUTE    (ActionOrchestrator.execute -> ExecutionResult) <- only if approved
+   GitLab pipeline (live)
+        │
+  DETECT     risk_scan / RiskDetector  -> RiskReport
+        │
+  DIAGNOSE   Gemini 3 over MCP-sourced pipeline metadata -> Diagnosis
+        │
+  PROPOSE    a tool call, e.g. cancel_pipeline(project, pipeline)
+        │
+  GATE       before_tool_callback -> human approval   ← differentiator
+        │
+  EXECUTE    the GitLab MCP tool runs (only if approved); else HOLD
 ```
 
 Concrete decisions:
 
-1. **Language/runtime:** Python 3.12.
-2. **Reasoning:** Gemini 2.0 Flash via `google-generativeai` (Google Cloud).
-3. **Agent framework:** Google ADK for multi-agent orchestration.
-4. **Actions:** GitLab MCP (official partner) as primary, GitHub MCP fallback,
-   via the official `mcp` SDK.
-5. **Gate (the soul):** placed **after** `act` proposes and **before**
-   `execute`. Any action with `destructive=True` must pass `RiskGate`.
-   The gate serializes the action + evidence + risk score + alternatives,
-   presents a Rich-rendered sign-off panel, waits for a human decision, and
-   logs it to an audit trail before anything runs.
-6. **Gate transport (ADR-002):** blocking CLI input for the hackathon, not an
-   async webhook — chosen for demo clarity. Webhook/Slack is post-hackathon.
-7. **Demo mode (ADR-003):** `SENTINEL_DEMO=true` swaps in mock clients
-   everywhere so the full pipeline runs without real API keys or live infra.
-8. **Fail-safe default:** the gate denies by default. An action is only
-   executed on an explicit, logged human approval.
-9. **Deployment:** Google Cloud Run (W3).
+1. **Runtime:** Python 3.12.
+2. **Reasoning:** Gemini 3 (`gemini-3.1-pro-preview`) on Vertex AI. Verified
+   servable on the Vertex *global* endpoint; auth via Application Default
+   Credentials (the Cloud Run service account), no key material in the image.
+3. **Agent framework:** Google ADK (`LlmAgent`, `Runner`, in-memory sessions).
+4. **Actions:** GitLab MCP server (PAT, `api` scope) via the `mcp` SDK / ADK
+   `McpToolset`. Reads are free; destructive tools are gated.
+5. **Gate (the soul):** enforced *inside the agent loop* via ADK's
+   `before_tool_callback`. A destructive tool call is intercepted before it can
+   run — return a value to HOLD, return `None` to proceed. This means no tool,
+   present or future, can bypass the gate. The decision (Approve and Deny) is
+   appended to an audit trail before anything executes.
+6. **Fail-safe default:** the gate denies in non-interactive contexts unless
+   `SENTINEL_AUTO_APPROVE=true` is set explicitly.
+7. **Surfaces:** the same gated flow is exposed via a Rich CLI and a
+   dependency-free web UI (the deployed Cloud Run surface).
+8. **Deployment:** Google Cloud Run.
 
-Data contracts live in `src/sentinel/models.py`: `RiskSignal`, `RiskReport`,
-`Diagnosis`, `ProposedAction`, `ApprovalResult`, `ExecutionResult`,
-`SentinelResult`. Models are stdlib-only dataclasses so every module imports
-them without pulling heavy SDKs.
+Data contracts live in `src/sentinel/models.py` (`RiskSignal`, `RiskReport`,
+`Diagnosis`, `ProposedAction`, `ApprovalResult`, `ExecutionResult`) as
+stdlib-only dataclasses, so every module imports them without heavy SDKs.
 
 ## Consequences
 
-**Enables (rubric coverage):**
-
-| Rubric criterion | How this architecture satisfies it |
-|------------------|------------------------------------|
-| Uses Google Cloud | Gemini 2.0 Flash in DIAGNOSE; Cloud Run deploy |
-| Multi-agent | 7 subagents + orchestrator; ADK |
-| MCP integration | GitLab MCP in ACT/EXECUTE via official SDK |
-| Responsible AI | Human risk-gate before destructive actions — THE feature |
-| Technical depth | Async pipeline, streaming diagnosis, mockable clients |
-| Demo quality | Linear pipeline reads cleanly in a 3-min terminal demo |
-| Originality | Human-in-the-loop gate few competitors will build |
-
-**Trade-offs:**
-- Linear pipeline (not a graph) — simpler and more demo-able; we lose
-  parallel branch evaluation, acceptable for the hackathon scope.
-- Blocking CLI gate — not production-grade transport, but unambiguous on
-  screen. Migration path to webhook/Slack is noted (ADR-002).
-- Demo mode means two code paths (real vs mock); kept behind one env flag and
-  one factory boundary to limit divergence.
-
-**Follow-ups:** ADR-002 (gate transport) and ADR-003 (demo mode) are recorded
-inline above and in `agents/architect.md`; promote to standalone ADR files if
-they grow.
+- Putting the gate in `before_tool_callback` (rather than beside the agent)
+  guarantees coverage of every destructive tool without per-tool wiring.
+- An offline mode (`SENTINEL_DEMO=true`) swaps in a deterministic diagnoser and
+  mock client so the flow runs with no credentials — this doubles as the test
+  path. Two code paths are kept behind one env flag to limit divergence.
+- Blocking gate input is unambiguous on screen but not a production transport;
+  a webhook/Slack transport is a natural follow-up.

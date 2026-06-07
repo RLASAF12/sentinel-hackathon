@@ -1,92 +1,57 @@
-# Sentinel — 3-Minute Demo Script
+# Sentinel — ~3-Minute Demo Script
 
-Total time: 3:00 max
-Format: Terminal screen recording
-Key moment: The gate at 1:30 — let it breathe (2+ seconds)
+Format: screen recording of the hosted web UI + the live GitLab pipelines page.
+Everything below is **real**: real Gemini 3, a real GitLab pipeline, a real cancel.
 
----
+- Sentinel: https://sentinel-258340350085.us-central1.run.app
+- GitLab pipelines: https://gitlab.com/harelasaf7-group/sentinel-demo-target/-/pipelines
 
-## Pre-Recording Setup
+Before recording, trigger a running pipeline so there's a live target:
 
-Font: Menlo or JetBrains Mono, 18pt
-Theme: Dark (Dracula or One Dark)
-Window: Large but not full screen
-
-Commands to run before recording:
-  export SENTINEL_DEMO=true
-  export SENTINEL_SCENARIO=high-risk
-  clear
+```bash
+curl -s -X POST -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "https://gitlab.com/api/v4/projects/82983615/pipeline?ref=main" >/dev/null
+```
 
 ---
 
-## Recording Timeline
+## [0:00] Cold open
+Camera on the Sentinel page.
+> "AI agents that act are dangerous without a brake. Sentinel is the brake —
+> the agent that knows when *not* to ship."
 
-### [0:00] Start
-Type and press Enter:
-  python -m src.sentinel.main --demo
+## [0:15] Detect + Diagnose (Gemini 3)
+Click **Review the pending deployment**. As the panels render:
+> "Sentinel reads a live GitLab pipeline through its MCP server and asks Gemini 3
+> to assess the blast radius."
+Point at the risk score and Gemini 3's root cause.
 
-### [0:05] Header
-  SENTINEL - Risk Guardian for CI/CD
-  Google Cloud Rapid Agent Hackathon
+## [0:40] The gate — the money shot
+Stop on the red **SENTINEL RISK GATE** panel. Let it breathe 2–3s.
+> "It wants to cancel the deploy. But it won't. It stops and asks a human. The AI
+> cannot proceed alone — and every decision is logged."
 
-### [0:15] DETECT phase (show scanner running)
-  [DETECT] Scanning merge request #1847... target: production
-  Signal: FILES_CHANGED = 47 files           [HIGH]
-  Signal: CONFIG_MODIFIED: k8s/prod.yaml     [HIGH]
-  Signal: COVERAGE_DELTA: -12.3%             [MEDIUM]
-  Risk score: 0.87    STATUS: HIGH RISK
+## [1:05] Deny → HOLD (the brake works)
+Click **Deny**. Show "HELD — pipeline left running."
+Switch to the GitLab pipelines tab, reload:
+> "I said no. The pipeline is still running. Nothing happened to production."
 
-### [0:45] DIAGNOSE phase (stream from Gemini or mock)
-  [DIAGNOSE] Sending to Gemini 2.0 Flash...
-  Root cause: Large deployment scope with infrastructure changes
-  Severity: HIGH
-  Recommended: Delay, restore coverage first
+## [1:40] Approve → real effect
+Back in Sentinel, run again and click **Approve**. Show "Cancelled pipeline … via GitLab."
+Switch to the GitLab tab, reload:
+> "This time I approve — and the pipeline is cancelled, for real, through the
+> GitLab MCP server. The agent acted only because a human said go."
 
-### [1:15] ACT phase
-  [ACT] Proposed: ROLLBACK pipeline #12345
-  Type: DESTRUCTIVE ACTION
+## [2:20] Audit trail
+Point at the audit entry (approver, timestamp, gitlab_status).
+> "Approve or deny, it's the same append-only record. Fully auditable."
 
-### [1:30] THE GATE — MONEY SHOT
-  PAUSE 2+ SECONDS. Let audience read this.
-
-  +--------------------------------------------------+
-  |         SENTINEL RISK GATE                       |
-  +--------------------------------------------------+
-  |  Action:      ROLLBACK pipeline #12345           |
-  |  Risk Score:  87% (HIGH)                         |
-  |  Evidence:    47 files, config change,           |
-  |               coverage -12.3%                    |
-  |  Alternative: Delay 2h + notify team             |
-  +--------------------------------------------------+
-  Human approval required. AI cannot proceed alone.
-
-  Approve? (y)es / (n)o / (d)etails:
-
-  [Speak or caption]: "No AI agent in this competition stops here and asks you. Sentinel does."
-
-### [2:00] Approval
-Type: y
-
-  Approved by: human-operator
-  Executing ROLLBACK via GitLab MCP...
-  Pipeline #12345 cancelled.
-  Audit entry written to sentinel-audit.log
-  Deployment held. Team notified. Production protected.
-
-### [2:20] Architecture flash (3 seconds)
-  Detect -> Diagnose (Gemini) -> Act (GitLab MCP) -> GATE -> Execute
-                                                      ^
-                                                 Human required
-
-### [2:45] Close
-  Sentinel — the agent that knows when not to ship.
-  Google ADK | Gemini 2.0 Flash | GitLab MCP | Cloud Run
-
-### [3:00] End
+## [2:40] Close
+> "Gemini 3 for the reasoning, Google ADK for the agent, GitLab's MCP server for
+> the action — and a human gate so it never ships on its own. Sentinel."
 
 ---
 
-## After Recording
-- Upload to YouTube (unlisted) or Loom
-- Note URL for Devpost
-- Thumbnail: screenshot of the gate panel
+## After recording
+- Upload to YouTube (unlisted) or Loom; note the URL for Devpost.
+- Thumbnail: the gate panel (scripts/shots/sentinel-03-gate-hero.png).

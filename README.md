@@ -1,136 +1,113 @@
 # Sentinel
 ### The AI agent that knows when not to ship.
 
-> Google Cloud Rapid Agent Hackathon submission
+Sentinel guards a GitLab project's deploy pipeline. It reads pipeline state
+through GitLab's MCP server, reasons about deployment blast radius with **Gemini
+3**, and when it wants to take a destructive action — cancel a deploy, revert a
+change — it **stops and requires human approval**, writing an append-only audit
+trail of every decision.
+
+Most AI agents act. Sentinel knows when *not* to. The human risk-gate is the
+difference between *AI assistance* and *AI autonomy over production*.
+
+**Live demo:** https://sentinel-258340350085.us-central1.run.app
+
+![The Sentinel risk gate](scripts/shots/sentinel-03-gate-hero.png)
 
 ---
 
-## What It Does
+## How it works
 
-Sentinel is a deployment risk guardian. When a developer opens a PR or triggers a deployment, Sentinel:
+```
+   GitLab pipeline (live)
+            │
+   DETECT   │  risk signals: prod target, pipeline state, coverage drop
+            ▼
+   DIAGNOSE │  Gemini 3 reasons over real pipeline metadata (via GitLab MCP)
+            ▼
+   PROPOSE  │  e.g. cancel_pipeline(project, pipeline)
+            ▼
+   ┌─────── GATE ───────┐   ← the differentiator
+   │ human approval req. │
+   └─────────┬───────────┘
+       approve │ deny
+            ▼     ▼
+   EXECUTE      HOLD       both appended to the audit log
+ (real cancel) (no-op)
+```
 
-1. **Detects** risk signals: file churn, config changes, test regressions, production targets
-2. **Diagnoses** root cause with Gemini 2.0 Flash
-3. **Proposes** actions via GitLab MCP tools (rollback, alert, hold)
-4. **Gates** any destructive action behind human approval
-5. **Executes** only with explicit sign-off — every decision logged
-
-**The gate is the differentiator.** AI suggests. You decide. Sentinel remembers.
+The agent's brain is a Google **ADK `LlmAgent` running Gemini 3**
+(`gemini-3.1-pro-preview` on Vertex AI). Its tools are the **real GitLab MCP
+server** plus a `risk_scan` function tool. The gate is enforced *inside the agent
+loop* by an ADK `before_tool_callback`: any destructive tool call is intercepted
+before it can run, routed to the human, and only executed on approval — so no
+tool, present or future, can bypass it.
 
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
 git clone https://github.com/RLASAF12/sentinel-hackathon
 cd sentinel-hackathon
 pip install -r requirements.txt
-
-# Demo mode (no API keys required) — full pipeline with mock MCP + heuristic diagnosis
-python -m src.sentinel.main --demo
-
-# With real APIs
-export GEMINI_API_KEY=your_key
-export GITLAB_TOKEN=your_token
-python -m src.sentinel.main
-
-# Run the tests
-pytest -q
-
-# Run the Cloud Run health server locally
-python -m src.sentinel.main --serve   # then: curl localhost:8080/health
+pytest -q                       # 11 tests
 
 # Web UI — the approval moment in the browser
-python -m src.sentinel.web            # then open http://localhost:8080
+python -m src.sentinel.web      # then open http://localhost:8080
 ```
 
-> **Qualification-stack rebuild (in progress):** `src/sentinel/agent.py` rebuilds
-> the orchestration as a Google ADK `LlmAgent` on **Gemini 3** whose tools are the
-> **real GitLab MCP server**, with the human gate enforced via a
-> `before_tool_callback`. It's written against the verified ADK API but must be
-> installed/run/deployed from a Google Cloud session — see
-> [`WINNING-BUILD-PROMPT.md`](WINNING-BUILD-PROMPT.md).
+Configure the live stack (see `.env.example`):
 
-At the gate, type `y` to approve, `n` to hold, or `d` to inspect evidence.
-A captured run is in [`docs/demo-capture.txt`](docs/demo-capture.txt).
+```bash
+# Gemini 3 via Vertex AI (Application Default Credentials)
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT=your-project
+export GOOGLE_CLOUD_LOCATION=global
+export SENTINEL_MODEL=gemini-3.1-pro-preview
+
+# GitLab MCP (PAT with api scope)
+export GITLAB_TOKEN=glpat-...
+export GITLAB_PROJECT_ID=12345
+export SENTINEL_DEMO=false
+```
+
+Run the agent against a real pipeline:
+
+```python
+import asyncio
+from src.sentinel.agent import run_agent
+asyncio.run(run_agent("Assess pipeline 123 on project 12345 and act if needed."))
+```
+
+At the gate, approve (`y`) to let the action run, or deny (`n`) to hold it.
+An optional offline mode (`SENTINEL_DEMO=true`) swaps in a deterministic
+diagnoser and mock client so the flow runs with no credentials.
 
 ---
 
-## The Differentiator
-
-Most AI agents act. Sentinel **stops**.
-
-Every other deployment bot races to fix prod on its own. Sentinel does the
-analysis, proposes the fix, and then **halts at a human gate** before anything
-destructive runs — showing you what it wants to do, why, the risk score, and
-the alternatives. AI suggests. You decide. Every decision is logged.
-
-That gate is the whole point. It's the line between *AI assistance* and
-*AI autonomy over production* — and engineers want the former.
-
----
-
-## Architecture
-
-```mermaid
-flowchart TD
-    A[PR / Deploy Event] --> B[DETECT<br/>risk signal scanner]
-    B --> C[DIAGNOSE<br/>Gemini 2.0 Flash root cause]
-    C --> D[ACT<br/>GitLab MCP proposes action]
-    D --> E{Destructive?}
-    E -- no --> G[EXECUTE]
-    E -- yes --> F[/SENTINEL RISK GATE<br/>human approval required/]
-    F -- approve --> G[EXECUTE<br/>logged + auditable]
-    F -- hold --> H[HOLD<br/>logged + auditable]
-    G --> I[(sentinel-audit.log)]
-    H --> I
-```
-
-```
-[PR / Deploy Event]
-        |
-   [DETECT]    Risk signal scanner
-        |
-   [DIAGNOSE]  Gemini 2.0 Flash root cause analysis
-        |
-   [ACT]       GitLab MCP tool selection
-        |
-   [GATE]  <-- HUMAN APPROVAL REQUIRED (if destructive)
-        |
-[SHIP / HOLD]  Logged, auditable
-```
-
-Multi-agent system (Google ADK): Orchestrator + 7 specialized subagents + 5 workflow commands.
-
----
-
-## The Risk Gate
+## The risk gate
 
 ```
 ╭───────────────────────── SENTINEL RISK GATE ──────────────────────────╮
-│  Action      ROLLBACK pipeline #12345                                  │
-│  Risk Score  98%                                                       │
-│  Type        ROLLBACK                                                  │
-│  Evidence 1  Large deployment scope + infra/config changes            │
-│  Evidence 2  Delay 2h and notify the on-call team                     │
-│  Evidence 3  Restore test coverage before deploying                   │
+│  Action      cancel_pipeline(project_id=82983615, pipeline_id=2583164746) │
+│  Risk Score  86%                                                       │
+│  Type        CANCEL_PIPELINE · DESTRUCTIVE                             │
+│  Evidence 1  Pipeline 2583164746 ('running') on ref main              │
+│  Evidence 2  Gemini 3: recent change sharply reduced test coverage    │
 ╰───────── Human approval required — AI cannot proceed alone ───────────╯
-
-Approve? (y) / (n) / (d)etails:
 ```
-
-Before any destructive action runs, Sentinel shows you what, why, risk score, and alternatives. You decide. No autonomous destructive actions — ever.
 
 Every decision is appended to `sentinel-audit.log` as a JSON line:
 
 ```json
-{"timestamp": "2026-06-06T11:22:48Z", "action": "rollback", "destructive": true,
- "risk_score": 0.98, "approved": false, "approver": "human-cli", "notes": "Decision: 'n'"}
+{"timestamp":"2026-06-07T17:59:21Z","action":"cancel_pipeline","destructive":true,
+ "risk_score":0.86,"approved":true,"approver":"human-web"}
 ```
 
-**Fail-safe by design:** anything other than an explicit `y` holds the action.
-In non-interactive contexts (CI, piped recordings) the gate denies by default
-unless `SENTINEL_AUTO_APPROVE=true` is set.
+**Fail-safe by design:** anything other than an explicit approval holds the
+action. In non-interactive contexts the gate denies by default unless
+`SENTINEL_AUTO_APPROVE=true` is set.
 
 ---
 
@@ -138,76 +115,36 @@ unless `SENTINEL_AUTO_APPROVE=true` is set.
 
 | Component | Role |
 |-----------|------|
-| Gemini 2.0 Flash | Risk diagnosis, root cause analysis |
-| Google ADK | Multi-agent orchestration |
-| Cloud Run | Deployment target (`Dockerfile` + `deploy.sh`, `/health` endpoint) |
+| Gemini 3 (`gemini-3.1-pro-preview`) | Blast-radius diagnosis on Vertex AI |
+| Google ADK | Agent runtime (`LlmAgent`, `Runner`, `before_tool_callback` gate) |
+| Vertex AI | Model serving (auth via the runtime service account) |
+| Cloud Run | Hosting; auth via ADC, `/health` endpoint |
 
-Deploy: `PROJECT_ID=<id> ./deploy.sh` (builds with Cloud Build, deploys to Cloud Run).
-Gemini is called lazily — in demo mode a deterministic heuristic stands in so the
-pipeline runs with zero credentials.
-
----
-
-## MCP Integration
-
-Uses the official **GitLab MCP server**. Wrapped tools:
-- `get_merge_request_diff` — fetch diff for analysis
-- `create_merge_request_note` — post risk assessment comment
-- `cancel_pipeline` — rollback (always gated before execution)
+Deploy: `GITLAB_TOKEN=glpat-... ./deploy.sh` — builds from source with Cloud
+Build and deploys the web UI to Cloud Run, running as a service account with
+`roles/aiplatform.user` so Gemini 3 authenticates with no key material in the
+image.
 
 ---
 
-## Responsible AI
+## GitLab MCP
 
-The gate is a design principle, not a UI checkbox:
-- AI cannot execute destructive actions without human approval
-- Every decision is logged: timestamp, approver, risk score, context
-- Audit log is append-only
-- Demo and production mode both enforce the gate
-
----
-
-## Using This Repo with Claude Code
-
-Clone this repo, open in Claude Code, then:
-```
-Run W1.
-```
-
-W1 locks scope. W2 builds the core. W3 wires integrations. W4 records demo and submits. W5 polishes.
+Sentinel drives a GitLab MCP server with a Personal Access Token (`api` scope).
+Tools used include `get_pipeline` / `list_pipelines` (read) and `cancel_pipeline`
+/ `create_merge_request` (destructive — always gated). The official GitLab MCP
+server (`/api/v4/mcp`) is supported on GitLab Duo instances; the default uses the
+PAT-based GitLab MCP so any account can run it. See [`docs/mcp-setup.md`](docs/mcp-setup.md).
 
 ---
 
-## Repo Structure
+## Project layout
 
 ```
-sentinel-hackathon/
-+-- CLAUDE.md          Orchestrator master prompt (start here for Claude Code)
-+-- PLAN.md            5-day sprint plan + rubric map
-+-- agents/            7 subagent definitions
-+-- workflows/         W1-W5 Claude Code workflow commands
-+-- src/sentinel/      Core pipeline: detect, diagnose, act, gate, main
-+-- src/mcp/           GitLab MCP client + demo mock
-+-- docs/              Demo script + capture, submission draft, ADR, MCP setup
-+-- tests/             Test suite (pytest)
-+-- Dockerfile         Cloud Run image
-+-- deploy.sh          Cloud Run deploy script
-```
-
----
-
-## Demo
-
-- **Video:** _[add unlisted YouTube/Loom URL after recording — see `docs/demo-script.md`]_
-- **Captured run:** [`docs/demo-capture.txt`](docs/demo-capture.txt) (golden path, gate approved)
-
-Record with:
-
-```bash
-export SENTINEL_DEMO=true
-clear
-python -m src.sentinel.main --demo
-# type 'y' at the gate — let the panel breathe for 2+ seconds (the money shot)
+src/sentinel/   agent (ADK + Gemini 3), detect, diagnose, gate, act, web, live
+src/mcp/        GitLab MCP client (+ offline mock)
+tests/          pytest suite (gate + agent-callback)
+docs/           architecture decision record, demo script, MCP setup
+Dockerfile      Cloud Run image            deploy.sh   Cloud Run deploy
 ```
 
 ---
@@ -215,7 +152,3 @@ python -m src.sentinel.main --demo
 ## License
 
 [MIT](LICENSE) © 2026 Harel Asaf
-
----
-
-*Google Cloud Rapid Agent Hackathon | 2026*

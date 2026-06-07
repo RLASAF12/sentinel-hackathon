@@ -7,21 +7,18 @@ and every destructive tool call is intercepted by the human risk-gate via a
 agent loop, with the same append-only audit trail.
 
 ────────────────────────────────────────────────────────────────────────────
-STATUS: DRAFT written against the verified ADK API (June 2026). It is NOT run
-in the build container (no google-adk, no Gemini 3 key, no GitLab token). The
-cloud-access session must:
-  1. `pip install "google-adk>=1.14.0"` and confirm the imports below.
-  2. Confirm the live Gemini 3 model id (see GEMINI_3_MODEL note).
-  3. Provide GITLAB_TOKEN + the GitLab MCP server command, then run + verify.
-See WINNING-BUILD-PROMPT.md (Fixes 2–4) for acceptance criteria.
+Verified live against Google Cloud + GitLab:
+  - Gemini 3 (`gemini-3.1-pro-preview`) serves on the Vertex AI GLOBAL endpoint;
+    a real agent run drove diagnosis and the gate held a destructive tool call.
+  - GitLab MCP read a real pipeline and cancelled it after human approval via
+    the PAT-based GitLab MCP server; the official HTTP server (/api/v4/mcp) is
+    supported for GitLab Duo instances.
 
-API verified against (June 2026):
-  - McpToolset(connection_params=StdioConnectionParams(server_params=...),
-        tool_filter=[...], require_confirmation=...)
-    google/adk-python src/google/adk/tools/mcp_tool/mcp_toolset.py
+API used (ADK 2.2.0):
+  - McpToolset(connection_params=StreamableHTTPConnectionParams(url=, headers=)
+        | StdioConnectionParams(server_params=...), tool_filter=[...])
   - before_tool_callback: Callable[[BaseTool, dict, ToolContext], Optional[dict]]
     return a dict -> skip the tool (our HOLD); return None -> proceed (approved)
-    google/adk-python src/google/adk/agents/llm_agent.py
 ────────────────────────────────────────────────────────────────────────────
 """
 
@@ -35,10 +32,12 @@ from .models import ProposedAction
 
 logger = logging.getLogger(__name__)
 
-# Gemini 3 model id. The brief requires Gemini 3. As of 2026, gemini-3-pro-preview
-# was superseded by gemini-3.1-pro-preview on Vertex AI — the cloud session MUST
-# confirm the currently-served id. Override with SENTINEL_MODEL.
-GEMINI_3_MODEL = os.getenv("SENTINEL_MODEL", "gemini-3-pro-preview")
+# Gemini 3 model id. The brief requires Gemini 3. Verified live against Vertex AI
+# (project sentinel-hackathon-2026, June 2026): gemini-3.1-pro-preview serves on
+# the *global* endpoint; gemini-3-pro-preview is listed but returns 404 on
+# generate. gemini-3.5-flash / gemini-3-flash-preview also serve. Override with
+# SENTINEL_MODEL. NB: Gemini 3 pro-preview requires GOOGLE_CLOUD_LOCATION=global.
+GEMINI_3_MODEL = os.getenv("SENTINEL_MODEL", "gemini-3.1-pro-preview")
 
 # A tool call is destructive (and therefore gated) when its name contains any of
 # these keywords. Keyword matching is deliberate: exact GitLab MCP tool names
@@ -135,36 +134,91 @@ def risk_scan(context: dict) -> dict:
     }
 
 
+# GitLab tool names we expose (verified against GitLab MCP docs, June 2026).
+# Reads are free; cancel_pipeline / create_merge_request are gated by the callback.
+GITLAB_TOOL_FILTER = [
+    "get_merge_request",
+    "get_pipeline",
+    "list_pipelines",
+    "list_pipeline_jobs",
+    "create_merge_request_note",
+    "create_merge_request",
+    "cancel_pipeline",
+]
+
+
 def build_gitlab_mcp_toolset():
     """Construct the real GitLab MCP toolset (lazy ADK import).
 
-    Requires google-adk installed and GITLAB_TOKEN set. The exact GitLab MCP
-    server command/tool names must be confirmed in the cloud session.
+    Two backends, selected by ``SENTINEL_GITLAB_MCP``:
+
+    - ``stdio`` (default): the community ``@zereight/mcp-gitlab`` server, driven
+      by a Personal Access Token (``api`` scope). Verified live against GitLab.com
+      SaaS — exposes ``cancel_pipeline`` / ``create_merge_request`` etc. with
+      ``USE_PIPELINE=true``. This is the default because it works on any GitLab
+      plan.
+    - ``http``: GitLab's **official** MCP server over Streamable HTTP
+      (``/api/v4/mcp`` + ``Authorization: Bearer <PAT>``). The most
+      partner-credible option, but the endpoint requires **GitLab Duo** (a paid
+      plan); it returns 404 on Free accounts. Use this on a Duo-enabled instance.
+
+    Requires google-adk + mcp installed and GITLAB_TOKEN set.
     """
     from google.adk.tools.mcp_tool import McpToolset
-    from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
-    from mcp import StdioServerParameters
+
+    token = os.getenv("GITLAB_TOKEN", "")
+    gitlab_url = os.getenv("GITLAB_URL", "https://gitlab.com").rstrip("/")
+    mode = os.getenv("SENTINEL_GITLAB_MCP", "stdio").lower()
+
+    if mode == "stdio":
+        from google.adk.tools.mcp_tool import StdioConnectionParams
+        from mcp import StdioServerParameters
+
+        # Prefer the globally-installed binary (fast); fall back to npx download.
+        import shutil
+
+        if shutil.which("mcp-gitlab"):
+            command, args = "mcp-gitlab", []
+        else:
+            command, args = "npx", ["-y", "@zereight/mcp-gitlab"]
+
+        # StdioServerParameters.env REPLACES the subprocess environment, so we
+        # must forward anything the Node server needs — notably PATH and, in
+        # TLS-intercepting environments, the CA bundle (NODE_EXTRA_CA_CERTS),
+        # or Node rejects HTTPS with "self-signed certificate in chain".
+        child_env = {
+            "GITLAB_PERSONAL_ACCESS_TOKEN": token,
+            "GITLAB_API_URL": f"{gitlab_url}/api/v4",
+            # Expose CI/CD pipeline tools (get/list/cancel_pipeline).
+            "USE_PIPELINE": os.getenv("USE_PIPELINE", "true"),
+            "PATH": os.getenv("PATH", ""),
+        }
+        for var in ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "HOME"):
+            if os.getenv(var):
+                child_env[var] = os.environ[var]
+
+        return McpToolset(
+            connection_params=StdioConnectionParams(
+                server_params=StdioServerParameters(
+                    command=command,
+                    args=args,
+                    env=child_env,
+                ),
+                # First npx run downloads the package; give it room.
+                timeout=float(os.getenv("SENTINEL_MCP_TIMEOUT", "60")),
+            ),
+            tool_filter=GITLAB_TOOL_FILTER,
+        )
+
+    # Default: official GitLab MCP server over Streamable HTTP.
+    from google.adk.tools.mcp_tool import StreamableHTTPConnectionParams
 
     return McpToolset(
-        connection_params=StdioConnectionParams(
-            server_params=StdioServerParameters(
-                command="npx",
-                args=["-y", "@gitlab/mcp-server"],
-                env={
-                    "GITLAB_TOKEN": os.getenv("GITLAB_TOKEN", ""),
-                    "GITLAB_URL": os.getenv("GITLAB_URL", "https://gitlab.com"),
-                },
-            )
+        connection_params=StreamableHTTPConnectionParams(
+            url=f"{gitlab_url}/api/v4/mcp",
+            headers={"Authorization": f"Bearer {token}"},
         ),
-        # Expose read tools + the destructive ones we gate. Confirm names live.
-        tool_filter=[
-            "get_merge_request_diff",
-            "get_merge_request",
-            "get_pipeline",
-            "list_pipeline_jobs",
-            "create_merge_request_note",
-            "cancel_pipeline",
-        ],
+        tool_filter=GITLAB_TOOL_FILTER,
     )
 
 

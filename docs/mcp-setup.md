@@ -1,47 +1,46 @@
-# MCP Setup — GitLab MCP (primary)
+# MCP Setup — GitLab
 
-Sentinel's ACT phase talks to GitLab through the **official GitLab MCP server**
-via the Model Context Protocol Python SDK (`mcp`).
+Sentinel drives a GitLab MCP server with a Personal Access Token (`api` scope).
+Two backends are supported, selected by `SENTINEL_GITLAB_MCP`:
 
-## Install the GitLab MCP server
-
-```bash
-npm install -g @gitlab/mcp-server
-# or run on demand:
-npx @gitlab/mcp-server
-```
-
-## Environment
+## Default — PAT-based GitLab MCP (`stdio`, works on any plan)
 
 ```bash
+npm install -g @zereight/mcp-gitlab    # or run on demand via npx
+
 export GITLAB_TOKEN=<personal access token, api scope>
 export GITLAB_URL=https://gitlab.com   # or your self-hosted instance
+export USE_PIPELINE=true               # expose CI/CD pipeline tools
+export SENTINEL_GITLAB_MCP=stdio
 ```
 
-## Tools Sentinel wraps (`src/mcp/client.py`)
+The agent launches the server over stdio and exposes a filtered tool set (see
+`GITLAB_TOOL_FILTER` in `src/sentinel/agent.py`).
 
-| Method | MCP tool | Destructive | Gated |
-|--------|----------|-------------|-------|
-| `get_diff(project_id, mr_iid)` | `get_merge_request_diff` | no | no |
-| `create_comment(project_id, mr_iid, body)` | `create_merge_request_note` | no | no |
-| `get_pipeline(project_id, pipeline_id)` | `get_pipeline` | no | no |
-| `cancel_pipeline(project_id, pipeline_id)` | `cancel_pipeline` | **yes** | **yes** |
+## Official GitLab MCP (`http`, requires GitLab Duo)
 
-`cancel_pipeline` is the only destructive tool and is **always** routed through
-the risk gate before it runs.
-
-## Demo mode (no token needed)
+GitLab's official MCP server is served at `https://<instance>/api/v4/mcp` and
+authenticated with `Authorization: Bearer <PAT>`. It requires a paid GitLab Duo
+plan (returns 404 on Free). To use it:
 
 ```bash
-export SENTINEL_DEMO=true
+export SENTINEL_GITLAB_MCP=http
 ```
 
-`get_mcp_client()` returns `MockGitLabMCPClient`, which serves a canned diff and
-logs `[DEMO MCP]` actions instead of calling GitLab. This lets the full pipeline
-and the demo recording run with zero credentials.
+## Tools (reads free, destructive gated)
 
-## Fallback
+| MCP tool | Destructive | Gated |
+|----------|-------------|-------|
+| `get_pipeline`, `list_pipelines`, `list_pipeline_jobs`, `get_merge_request` | no | no |
+| `cancel_pipeline` | **yes** | **yes** |
+| `create_merge_request`, `create_merge_request_note` | **yes** | **yes** |
 
-GitHub MCP is the documented fallback if GitLab MCP is unavailable; the client
-interface (`get_diff` / `create_comment` / `get_pipeline` / `cancel_pipeline`)
-is intentionally provider-agnostic.
+Destructive tools are always routed through the human risk-gate before they run.
+
+## Notes
+
+- In TLS-intercepting environments, forward the CA bundle to the Node server
+  (`NODE_EXTRA_CA_CERTS`); the agent does this automatically when the variable
+  is set.
+- Offline mode (`SENTINEL_DEMO=true`) uses `MockGitLabMCPClient` so the flow runs
+  with no token — useful for tests and local development.

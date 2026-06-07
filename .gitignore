@@ -20,3 +20,9 @@ htmlcov/
 
 # Sentinel runtime
 sentinel-audit.log
+
+# Service-account keys (never commit)
+.secrets/
+*sa-key*.json
+service-account*.json
+*-key.json

@@ -33,7 +33,7 @@ console = Console()
 # Risk score below which Sentinel clears the deploy without diagnosis.
 RISK_THRESHOLD = 0.3
 
-# Demo scenario (mirrors agents/builder.md DEMO_RISK_CONTEXT).
+# Demo scenario used by the offline (SENTINEL_DEMO) path.
 DEMO_RISK_CONTEXT = {
     "files_changed": 47,
     "test_coverage_delta": -12.3,
@@ -77,7 +77,7 @@ async def run_sentinel(context: dict) -> SentinelResult:
     )
 
     # DIAGNOSE
-    console.print("\n[bold cyan][DIAGNOSE][/] Sending to Gemini 2.0 Flash...")
+    console.print("\n[bold cyan][DIAGNOSE][/] Reasoning with Gemini...")
     diagnosis = diagnoser.diagnose(report, diff)
     console.print(f"  Root cause: {diagnosis.root_cause}")
     console.print(f"  Severity:   {diagnosis.severity.value.upper()}")

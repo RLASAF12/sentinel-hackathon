@@ -1,10 +1,11 @@
-"""Diagnose phase — root-cause analysis via Gemini 2.0 Flash.
+"""Diagnose phase — root-cause analysis via Gemini.
 
 GeminiDiagnoser(api_key).diagnose(report, diff) -> Diagnosis
 
-Gemini (google-generativeai) is imported lazily. If the SDK or an API key is
-missing, or SENTINEL_DEMO=true, the diagnoser falls back to a deterministic
-heuristic so the full pipeline always runs (demo-safe).
+This is the lightweight CLI/offline diagnoser (google-generativeai), imported
+lazily. The primary, hosted path reasons with Gemini 3 on Vertex AI (see
+agent.py / live.py). If the SDK or an API key is missing, or SENTINEL_DEMO=true,
+this falls back to a deterministic heuristic so the pipeline always runs.
 """
 
 import json
@@ -16,7 +17,7 @@ from .models import Diagnosis, RiskReport, Severity
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = os.getenv("SENTINEL_DIAGNOSE_MODEL", "gemini-2.0-flash")
 
 PROMPT_TEMPLATE = """You are Sentinel, a deployment-risk diagnostician.
 
@@ -39,7 +40,7 @@ ONE action. Respond with ONLY a JSON object, no prose, in this exact shape:
 
 
 class GeminiDiagnoser:
-    """Turns a RiskReport into a Diagnosis using Gemini 2.0 Flash."""
+    """Turns a RiskReport into a Diagnosis using Gemini."""
 
     def __init__(self, api_key: str = "") -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
