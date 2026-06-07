@@ -202,4 +202,10 @@ python -m src.sentinel.main --demo
 
 ---
 
+## License
+
+[MIT](LICENSE) © 2026 Harel Asaf
+
+---
+
 *Google Cloud Rapid Agent Hackathon | 2026*
