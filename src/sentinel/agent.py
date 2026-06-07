@@ -7,17 +7,14 @@ and every destructive tool call is intercepted by the human risk-gate via a
 agent loop, with the same append-only audit trail.
 
 ────────────────────────────────────────────────────────────────────────────
-STATUS: VERIFIED LIVE (June 2026) in a Google Cloud session.
-  - google-adk 2.2.0 + mcp installed; all imports below resolve.
-  - Gemini 3 confirmed servable on Vertex AI: model `gemini-3.1-pro-preview`
-    on the GLOBAL endpoint (project sentinel-hackathon-2026). A real agent run
-    drove diagnosis and the gate HELD a destructive tool call (0 executions).
-  - GitLab MCP wired to GitLab's official HTTP server (/api/v4/mcp) + PAT.
-    Live destructive effect (cancel_pipeline) pending GITLAB_TOKEN + a running
-    pipeline on the throwaway project (82983615).
-See WINNING-BUILD-PROMPT.md (Fixes 2–4) for acceptance criteria.
+Verified live against Google Cloud + GitLab:
+  - Gemini 3 (`gemini-3.1-pro-preview`) serves on the Vertex AI GLOBAL endpoint;
+    a real agent run drove diagnosis and the gate held a destructive tool call.
+  - GitLab MCP read a real pipeline and cancelled it after human approval via
+    the PAT-based GitLab MCP server; the official HTTP server (/api/v4/mcp) is
+    supported for GitLab Duo instances.
 
-API verified against ADK 2.2.0:
+API used (ADK 2.2.0):
   - McpToolset(connection_params=StreamableHTTPConnectionParams(url=, headers=)
         | StdioConnectionParams(server_params=...), tool_filter=[...])
   - before_tool_callback: Callable[[BaseTool, dict, ToolContext], Optional[dict]]

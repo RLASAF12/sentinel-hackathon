@@ -1,7 +1,7 @@
 """Data models for the Sentinel pipeline.
 
-Owned by the architect subagent. These dataclasses are the contracts that
-flow through detect -> diagnose -> act -> gate -> execute. Kept dependency-free
+These dataclasses are the contracts that flow through
+detect -> diagnose -> act -> gate -> execute. Kept dependency-free
 (stdlib only) so every module can import them without pulling in heavy SDKs.
 """
 
