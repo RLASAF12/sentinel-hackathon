@@ -7,21 +7,21 @@ and every destructive tool call is intercepted by the human risk-gate via a
 agent loop, with the same append-only audit trail.
 
 ────────────────────────────────────────────────────────────────────────────
-STATUS: DRAFT written against the verified ADK API (June 2026). It is NOT run
-in the build container (no google-adk, no Gemini 3 key, no GitLab token). The
-cloud-access session must:
-  1. `pip install "google-adk>=1.14.0"` and confirm the imports below.
-  2. Confirm the live Gemini 3 model id (see GEMINI_3_MODEL note).
-  3. Provide GITLAB_TOKEN + the GitLab MCP server command, then run + verify.
+STATUS: VERIFIED LIVE (June 2026) in a Google Cloud session.
+  - google-adk 2.2.0 + mcp installed; all imports below resolve.
+  - Gemini 3 confirmed servable on Vertex AI: model `gemini-3.1-pro-preview`
+    on the GLOBAL endpoint (project sentinel-hackathon-2026). A real agent run
+    drove diagnosis and the gate HELD a destructive tool call (0 executions).
+  - GitLab MCP wired to GitLab's official HTTP server (/api/v4/mcp) + PAT.
+    Live destructive effect (cancel_pipeline) pending GITLAB_TOKEN + a running
+    pipeline on the throwaway project (82983615).
 See WINNING-BUILD-PROMPT.md (Fixes 2–4) for acceptance criteria.
 
-API verified against (June 2026):
-  - McpToolset(connection_params=StdioConnectionParams(server_params=...),
-        tool_filter=[...], require_confirmation=...)
-    google/adk-python src/google/adk/tools/mcp_tool/mcp_toolset.py
+API verified against ADK 2.2.0:
+  - McpToolset(connection_params=StreamableHTTPConnectionParams(url=, headers=)
+        | StdioConnectionParams(server_params=...), tool_filter=[...])
   - before_tool_callback: Callable[[BaseTool, dict, ToolContext], Optional[dict]]
     return a dict -> skip the tool (our HOLD); return None -> proceed (approved)
-    google/adk-python src/google/adk/agents/llm_agent.py
 ────────────────────────────────────────────────────────────────────────────
 """
 
@@ -35,10 +35,12 @@ from .models import ProposedAction
 
 logger = logging.getLogger(__name__)
 
-# Gemini 3 model id. The brief requires Gemini 3. As of 2026, gemini-3-pro-preview
-# was superseded by gemini-3.1-pro-preview on Vertex AI — the cloud session MUST
-# confirm the currently-served id. Override with SENTINEL_MODEL.
-GEMINI_3_MODEL = os.getenv("SENTINEL_MODEL", "gemini-3-pro-preview")
+# Gemini 3 model id. The brief requires Gemini 3. Verified live against Vertex AI
+# (project sentinel-hackathon-2026, June 2026): gemini-3.1-pro-preview serves on
+# the *global* endpoint; gemini-3-pro-preview is listed but returns 404 on
+# generate. gemini-3.5-flash / gemini-3-flash-preview also serve. Override with
+# SENTINEL_MODEL. NB: Gemini 3 pro-preview requires GOOGLE_CLOUD_LOCATION=global.
+GEMINI_3_MODEL = os.getenv("SENTINEL_MODEL", "gemini-3.1-pro-preview")
 
 # A tool call is destructive (and therefore gated) when its name contains any of
 # these keywords. Keyword matching is deliberate: exact GitLab MCP tool names
@@ -135,36 +137,65 @@ def risk_scan(context: dict) -> dict:
     }
 
 
+# GitLab tool names we expose (verified against GitLab MCP docs, June 2026).
+# Reads are free; cancel_pipeline / create_merge_request are gated by the callback.
+GITLAB_TOOL_FILTER = [
+    "get_merge_request",
+    "get_pipeline",
+    "list_pipelines",
+    "list_pipeline_jobs",
+    "create_merge_request_note",
+    "create_merge_request",
+    "cancel_pipeline",
+]
+
+
 def build_gitlab_mcp_toolset():
     """Construct the real GitLab MCP toolset (lazy ADK import).
 
-    Requires google-adk installed and GITLAB_TOKEN set. The exact GitLab MCP
-    server command/tool names must be confirmed in the cloud session.
+    Primary path is GitLab's **official** MCP server over HTTP
+    (``https://gitlab.com/api/v4/mcp``), authenticated with a Personal Access
+    Token (``api`` scope) via an ``Authorization: Bearer`` header — the most
+    credible integration for the GitLab partner track. Set
+    ``SENTINEL_GITLAB_MCP=stdio`` to fall back to the community stdio server
+    (``npx -y @zereight/mcp-gitlab``) if the hosted server's write tools are not
+    available on the account's plan.
+
+    Requires google-adk + mcp installed and GITLAB_TOKEN set.
     """
     from google.adk.tools.mcp_tool import McpToolset
-    from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
-    from mcp import StdioServerParameters
+
+    token = os.getenv("GITLAB_TOKEN", "")
+    gitlab_url = os.getenv("GITLAB_URL", "https://gitlab.com").rstrip("/")
+    mode = os.getenv("SENTINEL_GITLAB_MCP", "http").lower()
+
+    if mode == "stdio":
+        from google.adk.tools.mcp_tool import StdioConnectionParams
+        from mcp import StdioServerParameters
+
+        return McpToolset(
+            connection_params=StdioConnectionParams(
+                server_params=StdioServerParameters(
+                    command="npx",
+                    args=["-y", "@zereight/mcp-gitlab"],
+                    env={
+                        "GITLAB_PERSONAL_ACCESS_TOKEN": token,
+                        "GITLAB_API_URL": f"{gitlab_url}/api/v4",
+                    },
+                )
+            ),
+            tool_filter=GITLAB_TOOL_FILTER,
+        )
+
+    # Default: official GitLab MCP server over Streamable HTTP.
+    from google.adk.tools.mcp_tool import StreamableHTTPConnectionParams
 
     return McpToolset(
-        connection_params=StdioConnectionParams(
-            server_params=StdioServerParameters(
-                command="npx",
-                args=["-y", "@gitlab/mcp-server"],
-                env={
-                    "GITLAB_TOKEN": os.getenv("GITLAB_TOKEN", ""),
-                    "GITLAB_URL": os.getenv("GITLAB_URL", "https://gitlab.com"),
-                },
-            )
+        connection_params=StreamableHTTPConnectionParams(
+            url=f"{gitlab_url}/api/v4/mcp",
+            headers={"Authorization": f"Bearer {token}"},
         ),
-        # Expose read tools + the destructive ones we gate. Confirm names live.
-        tool_filter=[
-            "get_merge_request_diff",
-            "get_merge_request",
-            "get_pipeline",
-            "list_pipeline_jobs",
-            "create_merge_request_note",
-            "cancel_pipeline",
-        ],
+        tool_filter=GITLAB_TOOL_FILTER,
     )
 
 
